@@ -28,6 +28,7 @@
 #  include <KDE/KTextEdit>
 #  define MultiLineEditParent KTextEdit
 #else
+#  include <QEvent>
 #  include <QTextEdit>
 #  define MultiLineEditParent QTextEdit
 #endif
@@ -133,6 +134,8 @@ private:
     void showHistoryEntry();
     void updateScrollBars();
     void updateSizeHint();
+
+    static const int _macSizeChangeEvent;
 };
 
 

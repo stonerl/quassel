@@ -22,6 +22,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QScrollBar>
+#include <QEvent>
 
 #include "actioncollection.h"
 #include "bufferview.h"
@@ -30,6 +31,8 @@
 #include "tabcompleter.h"
 
 const int leftMargin = 3;
+
+const int MultiLineEdit::_macSizeChangeEvent = QEvent::MacSizeChange;
 
 MultiLineEdit::MultiLineEdit(QWidget *parent)
     : MultiLineEditParent(parent),
@@ -149,8 +152,11 @@ void MultiLineEdit::resizeEvent(QResizeEvent *event)
     QTextEdit::resizeEvent(event);
     updateSizeHint();
     updateScrollBars();
+# ifdef Q_WS_MAC
+    // QCoreApplication::postEvent ( QObject * receiver, QEvent * event )
+    QCoreApplication::postEvent(this, new QEvent((QEvent::Type)_macSizeChangeEvent));
+#endif
 }
-
 
 void MultiLineEdit::updateSizeHint()
 {
@@ -314,6 +320,11 @@ void MultiLineEdit::keyPressEvent(QKeyEvent *event)
             return;
         }
         MultiLineEditParent::keyPressEvent(event);
+
+# ifdef Q_WS_MAC
+    // QCoreApplication::postEvent ( QObject * receiver, QEvent * event )
+    QCoreApplication::postEvent(this, new QEvent((QEvent::Type)_macSizeChangeEvent));
+#endif
         return;
     }
 
