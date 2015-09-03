@@ -121,11 +121,11 @@ Section "--hidden Quassel Base" QUASSEL_BASE
 
     File /a /r /x "*.nsi" /x "*quassel.exe" /x "*quasselclient.exe" /x "*quasselcore.exe" /x "${setupname}" "${srcdir}\*.*" 
     File /a  ${MUI_ICON}
-    
-    ${If} "${vcredist}" != "none"
-        File /nonfatal /a /oname=vcredist.exe "${vcredist}"
-        nsExec::ExecToLog '"$INSTDIR\vcredist.exe" -quiet -install'        
-    ${EndIf}
+
+    !if "${vcredist}" != "none"
+        File /a /oname=vcredist.exe "${vcredist}"
+        ExecWait '"$INSTDIR\vcredist.exe" /passive'
+    !endif
     
     WriteUninstaller "${uninstaller}"
    
