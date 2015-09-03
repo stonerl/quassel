@@ -125,6 +125,7 @@ Section "--hidden Quassel Base" QUASSEL_BASE
     !if "${vcredist}" != "none"
         File /a /oname=vcredist.exe "${vcredist}"
         ExecWait '"$INSTDIR\vcredist.exe" /passive'
+        Delete "$INSTDIR\vcredist.exe"
     !endif
     
     WriteUninstaller "${uninstaller}"
