@@ -98,7 +98,10 @@ build_script:
     mv "$imageDir\bin\*" "$imageDir\"
     #mv "$imageDir\lib\qca-qt5\crypto" "$imageDir\crypto"
     mv "$imageDir\plugins\*" "$imageDir"
-    mv "$imageDir\lib\plugins\*" "$imageDir"
+    if(Test-Path "$imageDir\lib\plugins")
+    {
+        mv "$imageDir\lib\plugins\*" "$imageDir"
+    }
     rm -Recurse "$imageDir\plugins\*"
     rm -Recurse "$imageDir\lib"
     rm -Recurse "$imageDir\bin"
