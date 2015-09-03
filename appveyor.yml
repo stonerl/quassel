@@ -35,6 +35,9 @@ build_script:
                             "bin\\.*snore.*\.dll",
                             "lib\\plugins\\libsnore.*\\libsnore_backend.*\.dll",
                             "lib\\plugins\\libsnore.*\\libsnore_secondary_backend.*\.dll",
+                            #snorenotify 0.5
+                            "lib\\libsnore.*\\libsnore_backend.*\.dll",
+                            #
                             "bin\\SnoreToast\.exe",
                             #
                             #Growl
@@ -101,6 +104,11 @@ build_script:
     if(Test-Path "$imageDir\lib\plugins")
     {
         mv "$imageDir\lib\plugins\*" "$imageDir"
+    }
+    #snorenotify 0.5 plugins
+    if(Test-Path "$imageDir\lib\libsnore-qt5") 
+    {
+        mv "$imageDir\lib\libsnore-qt5\*" "$imageDir"
     }
     rm -Recurse "$imageDir\plugins\*"
     rm -Recurse "$imageDir\lib"
