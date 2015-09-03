@@ -112,6 +112,7 @@ environment:
     #mingw
     - COMPILER: mingw492_32
     #msvc
+    - COMPILER: msvc2013
     - COMPILER: msvc2013_64
     
     
