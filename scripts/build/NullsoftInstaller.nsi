@@ -10,16 +10,10 @@ var nameOfToBeRunend
 !define productname "Quassel"
 !define company "KDE"
 
+!include MUI2.nsh
+!include LogicLib.nsh
+!include SnoreNotify.nsh
 
-!include WinVer.nsh
-!define SnoreToastExe "$INSTDIR\SnoreToast.exe"
-!macro SnoreShortcut path exe appID
-    ${If} ${AtLeastWin8}
-        nsExec::ExecToLog '"${SnoreToastExe}" -install "${path}" "${exe}" "${appID}"'
-    ${Else}
-        CreateShortCut "${path}" "${exe}"
-    ${EndIf}
-!macroend
 
 ; registry stuff
 !define regkey "Software\${company}\${productname}"
@@ -32,6 +26,7 @@ Var StartMenuFolder
  
 !define PRODUCT_WEB_SITE http://quassel-irc.org/
 !define MyApp_AppUserModelId  QuasselProject.QuasselIRC
+!define SnoreToastExe "$INSTDIR\SnoreToast.exe"
 
 ;Start Menu Folder Page Configuration
 !define MUI_STARTMENUPAGE_REGISTRY_ROOT "HKLM" 
@@ -53,8 +48,6 @@ Name ${productname}
 Caption "${caption}"
  
 OutFile "${setupname}"
-!include "MUI2.nsh"
-!include "LogicLib.nsh"
 
 !define MUI_ICON ${gitDir}\pics\quassel.ico
 
