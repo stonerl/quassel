@@ -12,7 +12,7 @@ build_script:
 
     Init @("ninja", "png2ico", "nsis") ([ordered]@{"git://anongit.kde.org/extra-cmake-modules.git" = @{"branch" = "master"};
                                  "https://github.com/Snorenotify/SnoreGrowl.git" = @{"branch" = "v0.4.0"};
-                                 "https://github.com/Snorenotify/Snorenotify.git" = @{"branch" = "master"}})
+                                 "git://anongit.kde.org/snorenotify.git" = @{"branch" = "v0.5.3"; "options" = "-DWITH_QT4=OFF"}})
 
 
     mkdir -Force $env:APPVEYOR_BUILD_FOLDER\work\build\$env:APPVEYOR_PROJECT_NAME
@@ -32,13 +32,13 @@ build_script:
                             "bin\\libstdc.*\.dll",
                             #
                             #snore
-                            "bin\\libsnore.*\.dll",
+                            "bin\\.*snore.*\.dll",
                             "lib\\plugins\\libsnore.*\\libsnore_backend.*\.dll",
                             "lib\\plugins\\libsnore.*\\libsnore_secondary_backend.*\.dll",
                             "bin\\SnoreToast\.exe",
                             #
                             #Growl
-                            "bin\\libsnoregrowl.*\.dll",
+                            "bin\\.*snoregrowl.*\.dll",
                             #
                             #ssl
                             "bin\\libeay32\.dll",
