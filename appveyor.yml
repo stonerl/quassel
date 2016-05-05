@@ -41,6 +41,9 @@ build_script:
                             #Growl
                             "bin\\.*snoregrowl.*\.dll",
                             #
+                            #Sonnet
+                            "bin\\.*Sonnet.*\.dll",
+                            #
                             #ssl
                             ".*\\libeay32\.dll",
                             ".*\\ssleay32\.dll",
