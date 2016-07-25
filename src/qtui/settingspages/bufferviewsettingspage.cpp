@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2005-2015 by the Quassel Project                        *
+ *   Copyright (C) 2005-2016 by the Quassel Project                        *
  *   devel@quassel-irc.org                                                 *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -400,7 +400,7 @@ void BufferViewSettingsPage::on_deleteBufferView_clicked()
                     break;
                 }
                 else {
-                    iter++;
+                    ++iter;
                 }
             }
             delete config;
@@ -524,7 +524,7 @@ bool BufferViewSettingsPage::testHasChanged()
         }
         else {
             changed = true;
-            iter++;
+            ++iter;
         }
     }
     return changed;

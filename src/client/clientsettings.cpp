@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2005-2015 by the Quassel Project                        *
+ *   Copyright (C) 2005-2016 by the Quassel Project                        *
  *   devel@quassel-irc.org                                                 *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -216,7 +216,7 @@ QSet<int> CoreAccountSettings::bufferViewOverlay()
 {
     QSet<int> viewIds;
     QVariantList variants = accountValue("BufferViewOverlay").toList();
-    for (QVariantList::const_iterator iter = variants.constBegin(); iter != variants.constEnd(); iter++) {
+    for (QVariantList::const_iterator iter = variants.constBegin(); iter != variants.constEnd(); ++iter) {
         viewIds << iter->toInt();
     }
     return viewIds;

@@ -127,8 +127,13 @@ endif()
 
 # Setting COMPILE_DEFINITIONS_<CONFIG> is deprecated since CMake 3.0 in favor of generator expressions.
 # These have existed since CMake 2.8.10; until we depend on that, we have to explicitly enable the old policy.
-if (CMAKE_MAJOR_VERSION GREATER 2)
+if (POLICY CMP0043)
     cmake_policy(SET CMP0043 OLD)
+endif()
+
+# Honor visibility settings for all target types
+if (POLICY CMP0063)
+    cmake_policy(SET CMP0063 NEW)
 endif()
 
 
@@ -210,19 +215,37 @@ if (USE_QT5)
             )
         endif()
 
-        find_package(Phonon4Qt5 QUIET)
-        set_package_properties(Phonon4Qt5 PROPERTIES TYPE RECOMMENDED
-            URL "https://projects.kde.org/projects/kdesupport/phonon"
-            DESCRIPTION "a multimedia abstraction library"
+        find_package(Qt5Multimedia QUIET)
+        set_package_properties(Qt5Multimedia PROPERTIES TYPE RECOMMENDED
+            URL "http://qt.digia.com"
+            DESCRIPTION "Multimedia support for Qt5"
             PURPOSE     "Required for audio notifications"
         )
 
-        find_package(LibsnoreQt5 QUIET)
+        if (NOT Qt5Multimedia_FOUND)
+            find_package(Phonon4Qt5 QUIET)
+            set_package_properties(Phonon4Qt5 PROPERTIES TYPE RECOMMENDED
+                URL "https://projects.kde.org/projects/kdesupport/phonon"
+                DESCRIPTION "a multimedia abstraction library"
+                PURPOSE     "Required for audio notifications"
+            )
+        endif()
+
+        find_package(LibsnoreQt5 0.7.0 QUIET)
         set_package_properties(LibsnoreQt5 PROPERTIES TYPE OPTIONAL
-            URL "https://github.com/TheOneRing/Snorenotify"
+            URL "https://projects.kde.org/projects/playground/libs/snorenotify"
             DESCRIPTION "a cross-platform notification framework"
             PURPOSE     "Enable support for the snorenotify framework"
         )
+        if(LibsnoreQt5_FOUND)
+            find_package(LibsnoreSettingsQt5)
+            set_package_properties(LibsnoreSettingsQt5 PROPERTIES TYPE REQUIRED
+                URL "https://projects.kde.org/projects/playground/libs/snorenotify"
+                DESCRIPTION "a cross-platform notification framework"
+                PURPOSE     "Enable support for the snorenotify framework"
+            )
+        endif()
+
 
         if (WITH_WEBKIT)
             find_package(Qt5WebKit QUIET)
@@ -266,17 +289,22 @@ if (USE_QT5)
 
         if (ECM_FOUND)
             list(APPEND CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
-        endif()
-
-        if (WITH_KDE)
-            find_package(KF5 COMPONENTS ConfigWidgets CoreAddons Notifications NotifyConfig TextWidgets WidgetsAddons XmlGui QUIET)
-            set_package_properties(KF5 PROPERTIES TYPE REQUIRED
-                URL "http://www.kde.org"
-                DESCRIPTION "KDE Frameworks"
-                PURPOSE     "Required for integration into the Plasma desktop"
-            )
-
-        endif()
+            if (WITH_KDE)
+                find_package(KF5 COMPONENTS ConfigWidgets CoreAddons Notifications NotifyConfig TextWidgets WidgetsAddons XmlGui QUIET)
+                set_package_properties(KF5 PROPERTIES TYPE REQUIRED
+                    URL "http://www.kde.org"
+                    DESCRIPTION "KDE Frameworks"
+                    PURPOSE     "Required for integration into the Plasma desktop"
+                )
+            else(WITH_KDE)
+                find_package(KF5Sonnet QUIET)
+                set_package_properties(KF5Sonnet PROPERTIES TYPE RECOMMENDED
+                    URL "http://api.kde.org/frameworks-api/frameworks5-apidocs/sonnet/html"
+                    DESCRIPTION "framework for providing spell-checking capabilities"
+                    PURPOSE "Enables spell-checking support in input widgets"
+                )
+            endif(WITH_KDE)
+        endif(ECM_FOUND)
 
     endif(BUILD_GUI)
 
@@ -361,13 +389,6 @@ else(USE_QT5)
                 DESCRIPTION "a multimedia abstraction library"
                 PURPOSE     "Required for audio notifications"
             )
-
-            find_package(Libsnore QUIET)
-            set_package_properties(Libsnore PROPERTIES TYPE OPTIONAL
-                URL "https://github.com/TheOneRing/Snorenotify"
-                DESCRIPTION "a cross-platform notification framework"
-                PURPOSE     "Enable support for the snorenotify framework"
-            )
         endif(WITH_KDE)
 
         find_package(IndicateQt QUIET)
@@ -420,6 +441,25 @@ if (NOT WIN32)
     )
 endif()
 
+# Check for SSL support in Qt
+# As there's no easy way to get Qt's configuration in particular for Qt5, let's just compile
+# a small test program checking the defines. This works for both Qt4 and Qt5.
+cmake_push_check_state(RESET)
+set(CMAKE_REQUIRED_INCLUDES ${QT_INCLUDES} ${Qt5Core_INCLUDE_DIRS})
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${Qt5Core_EXECUTABLE_COMPILE_FLAGS}")
+
+if (USE_QT5 AND Qt5_POSITION_INDEPENDENT_CODE)
+    set(CMAKE_REQUIRED_FLAGS "-fPIC -DQT_NO_VERSION_TAGGING")
+endif()
+
+check_cxx_source_compiles("
+    #include \"qglobal.h\"
+    #if defined QT_NO_SSL
+    #  error \"No SSL support\"
+    #endif
+    int main() {}"
+    HAVE_SSL)
+cmake_pop_check_state()
 
 # Additional compile settings
 #####################################################################
@@ -482,20 +522,6 @@ if (NOT ZLIB_FOUND)
         message(STATUS "WARNING: This may be slow on 32 bit systems!")
     endif()
 endif()
-
-# Check for SSL support in Qt
-# As there's no easy way to get Qt's configuration in particular for Qt5, let's just compile
-# a small test program checking the defines. This works for both Qt4 and Qt5.
-cmake_push_check_state(RESET)
-set(CMAKE_REQUIRED_INCLUDES ${QT_INCLUDES} ${Qt5Core_INCLUDE_DIRS})
-check_cxx_source_compiles("
-    #include \"qglobal.h\"
-    #if defined QT_NO_OPENSSL || defined QT_NO_SSL
-    #  error \"No SSL support\"
-    #endif
-    int main() {}"
-    HAVE_SSL)
-cmake_pop_check_state()
 
 if (HAVE_SSL)
     add_definitions(-DHAVE_SSL)
@@ -570,6 +596,16 @@ include(GetGitRevisionDescription)
 get_git_head_revision(GIT_REFSPEC GIT_HEAD)
 git_describe(GIT_DESCRIBE --long)
 
+# If in a Git repo we can get the commit-date from a git command
+if (GIT_HEAD)
+    execute_process(
+        COMMAND git show -s --format=%ct
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE GIT_COMMIT_DATE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+endif()
+
 # If not in a Git repo try to read GIT_HEAD and GIT_DESCRIBE from
 # enviroment
 if (NOT GIT_HEAD OR NOT GIT_DESCRIBE)
@@ -585,6 +621,7 @@ endif()
 if (NOT GIT_HEAD OR NOT GIT_DESCRIBE)
     set(GIT_HEAD "")
     set(GIT_DESCRIBE "")
+    set(GIT_COMMIT_DATE 0)
 endif()
 
 configure_file(version.h.in ${CMAKE_BINARY_DIR}/version.h @ONLY)

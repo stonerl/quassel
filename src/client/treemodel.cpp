@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2005-2015 by the Quassel Project                        *
+ *   Copyright (C) 2005-2016 by the Quassel Project                        *
  *   devel@quassel-irc.org                                                 *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -105,7 +105,7 @@ void AbstractTreeItem::removeAllChilds()
         child = *childIter;
         child->setTreeItemFlags(0); // disable self deletion, as this would only fuck up consitency and the child gets deleted anyways
         child->removeAllChilds();
-        childIter++;
+        ++childIter;
     }
 
     emit beginRemoveChilds(0, numChilds - 1);
@@ -220,7 +220,7 @@ void AbstractTreeItem::dumpChildList()
         while (childIter != _childItems.constEnd()) {
             child = *childIter;
             qDebug() << "Row:" << child->row() << child << child->data(0, Qt::DisplayRole);
-            childIter++;
+            ++childIter;
         }
     }
     qDebug() << "==== End Of Childlist ====";

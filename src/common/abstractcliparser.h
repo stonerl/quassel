@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2005-2015 by the Quassel Project                        *
+ *   Copyright (C) 2005-2016 by the Quassel Project                        *
  *   devel@quassel-irc.org                                                 *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -54,7 +54,7 @@ protected:
             CliArgOption
         };
 
-        CliParserArg(const CliArgType type = CliArgInvalid, const char shortName = 0, const QString &help = QString(), const QString &valueName = QString(), const QString def = QString())
+        CliParserArg(const CliArgType type = CliArgInvalid, const char shortName = 0, const QString &help = QString(), const QString &valueName = QString(), const QString &def = QString())
             : type(type)
             , shortName(shortName)
             , help(help)

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2005-2015 by the Quassel Project                        *
+ *   Copyright (C) 2005-2016 by the Quassel Project                        *
  *   devel@quassel-irc.org                                                 *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -216,6 +216,8 @@ void CoreConnection::setState(ConnectionState state)
     if (state != _state) {
         _state = state;
         emit stateChanged(state);
+        if (state == Connected)
+            _wantReconnect = true;
         if (state == Disconnected)
             emit disconnected();
     }

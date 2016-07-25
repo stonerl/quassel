@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2005-2015 by the Quassel Project                        *
+ *   Copyright (C) 2005-2016 by the Quassel Project                        *
  *   devel@quassel-irc.org                                                 *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -152,7 +152,7 @@ void TabCompleter::complete()
             _lastCompletionLength += _nickSuffix.length();
         }
         else if (s.addSpaceMidSentence()) {
-            _lineEdit->insert(" ");
+            _lineEdit->addCompletionSpace();
             _lastCompletionLength++;
         }
 

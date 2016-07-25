@@ -43,6 +43,8 @@ set(SOURCES
 
     # needed for automoc
     coreinfo.h
+    irccap.h
+    protocol.h
 )
 
 if (USE_QT5)
@@ -93,7 +95,11 @@ if (APPLE)
     target_link_libraries(mod_common "-framework CoreServices" "-framework CoreFoundation")
 endif(APPLE)
 
-target_link_libraries(mod_common ${CMAKE_DL_LIBS} ${EXECINFO_LIBRARIES} ${ZLIB_LIBRARIES})
+target_link_libraries(mod_common ${CMAKE_DL_LIBS} ${EXECINFO_LIBRARIES})
+
+if(ZLIB_FOUND)
+    target_link_libraries(mod_common ${ZLIB_LIBRARIES})
+endif()
 
 # This is needed so translations are generated before trying to build the qrc.
 # Should probably find a nicer solution with proper dependencies between the involved files, though...

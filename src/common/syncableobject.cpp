@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2005-2015 by the Quassel Project                        *
+ *   Copyright (C) 2005-2016 by the Quassel Project                        *
  *   devel@quassel-irc.org                                                 *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -141,7 +141,7 @@ void SyncableObject::fromVariantMap(const QVariantMap &properties)
     while (iterator != properties.constEnd()) {
         propName = iterator.key();
         if (propName == "objectName") {
-            iterator++;
+            ++iterator;
             continue;
         }
 
@@ -152,7 +152,7 @@ void SyncableObject::fromVariantMap(const QVariantMap &properties)
         else
             setProperty(propName.toLatin1(), iterator.value());
         // qDebug() << "<<< SYNC:" << name << iterator.value();
-        iterator++;
+        ++iterator;
     }
 }
 

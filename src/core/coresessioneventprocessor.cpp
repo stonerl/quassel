@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2005-2015 by the Quassel Project                        *
+ *   Copyright (C) 2005-2016 by the Quassel Project                        *
  *   devel@quassel-irc.org                                                 *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -36,6 +36,9 @@
 #ifdef HAVE_QCA2
 #  include "keyevent.h"
 #endif
+
+// IRCv3 capabilities
+#include "irccap.h"
 
 CoreSessionEventProcessor::CoreSessionEventProcessor(CoreSession *session)
     : BasicHandler("handleCtcp", session),
@@ -92,13 +95,23 @@ void CoreSessionEventProcessor::tryNextNick(NetworkEvent *e, const QString &errn
 void CoreSessionEventProcessor::processIrcEventNumeric(IrcEventNumeric *e)
 {
     switch (e->number()) {
-    // CAP stuff
-    case 903:
-    case 904:
-    case 905:
-    case 906:
-    case 907:
-        qobject_cast<CoreNetwork *>(e->network())->putRawLine("CAP END");
+    // SASL authentication replies
+    // See: http://ircv3.net/specs/extensions/sasl-3.1.html
+
+    //case 900:  // RPL_LOGGEDIN
+    //case 901:  // RPL_LOGGEDOUT
+    // Don't use 900 or 901 for updating the local hostmask.  Unreal 3.2 gives it as the IP address
+    // even when cloaked.
+    // Every other reply should result in moving on
+    // TODO Handle errors to stop connection if appropriate
+    case 902:  // ERR_NICKLOCKED
+    case 903:  // RPL_SASLSUCCESS
+    case 904:  // ERR_SASLFAIL
+    case 905:  // ERR_SASLTOOLONG
+    case 906:  // ERR_SASLABORTED
+    case 907:  // ERR_SASLALREADY
+        // Move on to the next capability
+        coreNetwork(e)->sendNextCap();
         break;
 
     default:
@@ -137,30 +150,148 @@ void CoreSessionEventProcessor::processIrcEventAuthenticate(IrcEvent *e)
 #endif
 }
 
-
 void CoreSessionEventProcessor::processIrcEventCap(IrcEvent *e)
 {
-    // for SASL, there will only be a single param of 'sasl', however you can check here for
-    // additional CAP messages (ls, multi-prefix, et cetera).
-
-    if (e->params().count() == 3) {
-        if (e->params().at(2).startsWith("sasl")) { // Freenode (at least) sends "sasl " with a trailing space for some reason!
-            // FIXME use event
-            // if the current identity has a cert set, use SASL EXTERNAL
-#ifdef HAVE_SSL
-            if (!coreNetwork(e)->identityPtr()->sslCert().isNull()) {
-                coreNetwork(e)->putRawLine(coreNetwork(e)->serverEncode("AUTHENTICATE EXTERNAL"));
+    // Handle capability negotiation
+    // See: http://ircv3.net/specs/core/capability-negotiation-3.2.html
+    // And: http://ircv3.net/specs/core/capability-negotiation-3.1.html
+    if (e->params().count() >= 3) {
+        CoreNetwork *coreNet = coreNetwork(e);
+        QString capCommand = e->params().at(1).trimmed().toUpper();
+        if (capCommand == "LS" || capCommand == "NEW") {
+            // Either we've gotten a list of capabilities, or new capabilities we may want
+            // Server: CAP * LS * :multi-prefix extended-join account-notify batch invite-notify tls
+            // Server: CAP * LS * :cap-notify server-time example.org/dummy-cap=dummyvalue example.org/second-dummy-cap
+            // Server: CAP * LS :userhost-in-names sasl=EXTERNAL,DH-AES,DH-BLOWFISH,ECDSA-NIST256P-CHALLENGE,PLAIN
+            bool capListFinished;
+            QStringList availableCaps;
+            if (e->params().count() == 4) {
+                // Middle of multi-line reply, ignore the asterisk
+                capListFinished = false;
+                availableCaps = e->params().at(3).split(' ');
             } else {
-#endif
-                // Only working with PLAIN atm, blowfish later
-                coreNetwork(e)->putRawLine(coreNetwork(e)->serverEncode("AUTHENTICATE PLAIN"));
-#ifdef HAVE_SSL
+                // Single line reply
+                capListFinished = true;
+                availableCaps = e->params().at(2).split(' ');
             }
-#endif
+            // Store what capabilities are available
+            QStringList availableCapPair;
+            for (int i = 0; i < availableCaps.count(); ++i) {
+                // Capability may include values, e.g. CAP * LS :multi-prefix sasl=EXTERNAL
+                availableCapPair = availableCaps[i].trimmed().split('=');
+                if(availableCapPair.count() >= 2) {
+                    coreNet->addCap(availableCapPair.at(0).trimmed().toLower(), availableCapPair.at(1).trimmed());
+                } else {
+                    coreNet->addCap(availableCapPair.at(0).trimmed().toLower());
+                }
+            }
+
+            // Begin capability requests when capability listing complete
+            if (capListFinished)
+                coreNet->beginCapNegotiation();
+        } else if (capCommand == "ACK") {
+            // Server: CAP * ACK :multi-prefix sasl
+            // Got the capability we want, handle as needed.
+            // As only one capability is requested at a time, no need to split
+            QString acceptedCap = e->params().at(2).trimmed().toLower();
+
+            // Mark this cap as accepted
+            coreNet->acknowledgeCap(acceptedCap);
+
+            if (!coreNet->capsRequiringConfiguration.contains(acceptedCap)) {
+                // Some capabilities (e.g. SASL) require further messages to finish.  If so, do NOT
+                // send the next capability; it will be handled elsewhere in CoreNetwork.
+                // Otherwise, move on to the next capability
+                coreNet->sendNextCap();
+            }
+        } else if (capCommand == "NAK" || capCommand == "DEL") {
+            // Either something went wrong with this capability, or it is no longer supported
+            // > For CAP NAK
+            // Server: CAP * NAK :multi-prefix sasl
+            // > For CAP DEL
+            // Server: :irc.example.com CAP modernclient DEL :multi-prefix sasl
+            // CAP NAK and CAP DEL replies are always single-line
+
+            QStringList removedCaps;
+            removedCaps = e->params().at(2).split(' ');
+
+            // Store what capability was denied or removed
+            QString removedCap;
+            for (int i = 0; i < removedCaps.count(); ++i) {
+                removedCap = removedCaps[i].trimmed().toLower();
+                // Mark this cap as removed
+                coreNet->removeCap(removedCap);
+            }
+
+            if (capCommand == "NAK") {
+                // Continue negotiation when capability listing complete only if this is the result
+                // of a denied cap, not a removed cap
+                coreNet->sendNextCap();
+            }
         }
     }
 }
 
+/* IRCv3 account-notify
+ * Log in:  ":nick!user@host ACCOUNT accountname"
+ * Log out: ":nick!user@host ACCOUNT *" */
+void CoreSessionEventProcessor::processIrcEventAccount(IrcEvent *e)
+{
+    if (!checkParamCount(e, 1))
+        return;
+
+    IrcUser *ircuser = e->network()->updateNickFromMask(e->prefix());
+    if (ircuser) {
+        QString newAccount = e->params().at(0);
+        // WHOX uses '0' to indicate logged-out, account-notify uses '*'
+        if (newAccount != "*") {
+            // Account logged in, set account name
+            ircuser->setAccount(newAccount);
+        } else {
+            // Account logged out, set account name to logged-out
+            ircuser->setAccount("*");
+        }
+    } else {
+        qDebug() << "Received account-notify data for unknown user" << e->prefix();
+    }
+}
+
+/* IRCv3 away-notify - ":nick!user@host AWAY [:message]" */
+void CoreSessionEventProcessor::processIrcEventAway(IrcEvent *e)
+{
+    if (!checkParamCount(e, 2))
+        return;
+
+    // Nick is sent as part of parameters in order to split user/server decoding
+    IrcUser *ircuser = e->network()->ircUser(e->params().at(0));
+    if (ircuser) {
+        if (!e->params().at(1).isEmpty()) {
+            ircuser->setAway(true);
+            ircuser->setAwayMessage(e->params().at(1));
+        } else {
+            ircuser->setAway(false);
+        }
+    } else {
+        qDebug() << "Received away-notify data for unknown user" << e->params().at(0);
+    }
+}
+
+/* IRCv3 chghost - ":nick!user@host CHGHOST newuser new.host.goes.here" */
+void CoreSessionEventProcessor::processIrcEventChghost(IrcEvent *e)
+{
+    if (!checkParamCount(e, 2))
+        return;
+
+    IrcUser *ircuser = e->network()->updateNickFromMask(e->prefix());
+    if (ircuser) {
+        // Update with new user/hostname information.  setUser/setHost handles checking what
+        // actually changed.
+        ircuser->setUser(e->params().at(0));
+        ircuser->setHost(e->params().at(1));
+    } else {
+        qDebug() << "Received chghost data for unknown user" << e->prefix();
+    }
+}
 
 void CoreSessionEventProcessor::processIrcEventInvite(IrcEvent *e)
 {
@@ -182,11 +313,28 @@ void CoreSessionEventProcessor::processIrcEventJoin(IrcEvent *e)
     QString channel = e->params()[0];
     IrcUser *ircuser = net->updateNickFromMask(e->prefix());
 
+    if (net->capEnabled(IrcCap::EXTENDED_JOIN)) {
+        if (!checkParamCount(e, 3))
+            return;
+        // If logged in, :nick!user@host JOIN #channelname accountname :Real Name
+        // If logged out, :nick!user@host JOIN #channelname * :Real Name
+        // See:  http://ircv3.net/specs/extensions/extended-join-3.1.html
+        // FIXME Keep track of authed user account, requires adding support to ircuser.h/cpp
+        ircuser->setRealName(e->params()[2]);
+    }
+    // Else :nick!user@host JOIN #channelname
+
     bool handledByNetsplit = false;
     foreach(Netsplit* n, _netsplits.value(e->network())) {
         handledByNetsplit = n->userJoined(e->prefix(), channel);
         if (handledByNetsplit)
             break;
+    }
+
+    // If using away-notify, check new users.  Works around buggy IRC servers
+    // forgetting to send :away messages for users who join channels when away.
+    if (net->capEnabled(IrcCap::AWAY_NOTIFY)) {
+        net->queueAutoWhoOneshot(ircuser->nick());
     }
 
     if (!handledByNetsplit)
@@ -726,6 +874,19 @@ void CoreSessionEventProcessor::processIrcEvent324(IrcEvent *e)
 }
 
 
+/*  RPL_WHOISACCOUNT: "<nick> <account> :is authed as */
+void CoreSessionEventProcessor::processIrcEvent330(IrcEvent *e)
+{
+    if (!checkParamCount(e, 3))
+        return;
+
+    IrcUser *ircuser = e->network()->ircUser(e->params().at(0));
+    if (ircuser) {
+        ircuser->setAccount(e->params().at(1));
+    }
+}
+
+
 /* RPL_NOTOPIC */
 void CoreSessionEventProcessor::processIrcEvent331(IrcEvent *e)
 {
@@ -760,17 +921,16 @@ void CoreSessionEventProcessor::processIrcEvent352(IrcEvent *e)
     QString channel = e->params()[0];
     IrcUser *ircuser = e->network()->ircUser(e->params()[4]);
     if (ircuser) {
-        ircuser->setUser(e->params()[1]);
-        ircuser->setHost(e->params()[2]);
-
-        bool away = e->params()[5].startsWith("G");
-        ircuser->setAway(away);
-        ircuser->setServer(e->params()[3]);
-        ircuser->setRealName(e->params().last().section(" ", 1));
+        processWhoInformation(e->network(), channel, ircuser, e->params()[3], e->params()[1],
+                e->params()[2], e->params()[5], e->params().last().section(" ", 1));
     }
 
-    if (coreNetwork(e)->isAutoWhoInProgress(channel))
+    // Check if channel name has a who in progress.
+    // If not, then check if user nick exists and has a who in progress.
+    if (coreNetwork(e)->isAutoWhoInProgress(channel) ||
+        (ircuser && coreNetwork(e)->isAutoWhoInProgress(ircuser->nick()))) {
         e->setFlag(EventManager::Silent);
+    }
 }
 
 
@@ -793,13 +953,34 @@ void CoreSessionEventProcessor::processIrcEvent353(IrcEvent *e)
     QStringList nicks;
     QStringList modes;
 
+    // Cache result of multi-prefix to avoid unneeded casts and lookups with each iteration.
+    bool _useCapMultiPrefix = coreNetwork(e)->capEnabled(IrcCap::MULTI_PREFIX);
+
     foreach(QString nick, e->params()[2].split(' ', QString::SkipEmptyParts)) {
         QString mode;
 
-        if (e->network()->prefixes().contains(nick[0])) {
+        if (_useCapMultiPrefix) {
+            // If multi-prefix is enabled, all modes will be sent in NAMES replies.
+            // :hades.arpa 353 guest = #tethys :~&@%+aji &@Attila @+alyx +KindOne Argure
+            // See: http://ircv3.net/specs/extensions/multi-prefix-3.1.html
+            while (e->network()->prefixes().contains(nick[0])) {
+                // Mode found in 1 left-most character, add it to the list.
+                // Note: sending multiple modes may cause a warning in older clients.
+                // In testing, the clients still seemed to function fine.
+                mode.append(e->network()->prefixToMode(nick[0]));
+                // Remove this mode from the nick
+                nick = nick.remove(0, 1);
+            }
+        } else if (e->network()->prefixes().contains(nick[0])) {
+            // Multi-prefix is disabled and a mode prefix was found.
             mode = e->network()->prefixToMode(nick[0]);
             nick = nick.mid(1);
         }
+
+        // If userhost-in-names capability is enabled, the following will be
+        // in the form "nick!user@host" rather than "nick".  This works without
+        // special handling as the following use nickFromHost() as needed.
+        // See: http://ircv3.net/specs/extensions/userhost-in-names-3.2.html
 
         nicks << nick;
         modes << mode;
@@ -808,6 +989,124 @@ void CoreSessionEventProcessor::processIrcEvent353(IrcEvent *e)
     channel->joinIrcUsers(nicks, modes);
 }
 
+
+/*  RPL_WHOSPCRPL: "<yournick> 152 #<channel> ~<ident> <host> <servname> <nick>
+                    ("H"/ "G") <account> :<realname>"
+<channel> is * if not specific to any channel
+<account> is * if not logged in
+Follows HexChat's usage of 'whox'
+See https://github.com/hexchat/hexchat/blob/c874a9525c9b66f1d5ddcf6c4107d046eba7e2c5/src/common/proto-irc.c#L750
+And http://faerion.sourceforge.net/doc/irc/whox.var*/
+void CoreSessionEventProcessor::processIrcEvent354(IrcEvent *e)
+{
+    // First only check if at least one parameter exists.  Otherwise, it'll stop the result from
+    // being shown if the user chooses different parameters.
+    if (!checkParamCount(e, 1))
+        return;
+
+    if (e->params()[0].toUInt() != IrcCap::ACCOUNT_NOTIFY_WHOX_NUM) {
+        // Ignore WHOX replies without expected number for we have no idea what fields are specified
+        return;
+    }
+
+    // Now we're fairly certain this is supposed to be an automated WHOX.  Bail out if it doesn't
+    // match what we require - 9 parameters.
+    if (!checkParamCount(e, 9))
+        return;
+
+    QString channel = e->params()[1];
+    IrcUser *ircuser = e->network()->ircUser(e->params()[5]);
+    if (ircuser) {
+        processWhoInformation(e->network(), channel, ircuser, e->params()[4], e->params()[2],
+                e->params()[3], e->params()[6], e->params().last());
+        // Don't use .section(" ", 1) with WHOX replies, for there's no hopcount to trim out
+
+        // As part of IRCv3 account-notify, check account name
+        // WHOX uses '0' to indicate logged-out, account-notify uses '*'
+        QString newAccount = e->params()[7];
+        if (newAccount != "0") {
+            // Account logged in, set account name
+            ircuser->setAccount(newAccount);
+        } else {
+            // Account logged out, set account name to logged-out
+            ircuser->setAccount("*");
+        }
+    }
+
+    // Check if channel name has a who in progress.
+    // If not, then check if user nick exists and has a who in progress.
+    if (coreNetwork(e)->isAutoWhoInProgress(channel) ||
+        (ircuser && coreNetwork(e)->isAutoWhoInProgress(ircuser->nick()))) {
+        e->setFlag(EventManager::Silent);
+    }
+}
+
+
+void CoreSessionEventProcessor::processWhoInformation (Network *net, const QString &targetChannel, IrcUser *ircUser,
+                            const QString &server, const QString &user, const QString &host,
+                            const QString &awayStateAndModes, const QString &realname)
+{
+    ircUser->setUser(user);
+    ircUser->setHost(host);
+    ircUser->setServer(server);
+    ircUser->setRealName(realname);
+
+    bool away = awayStateAndModes.contains("G", Qt::CaseInsensitive);
+    ircUser->setAway(away);
+
+    if (net->capEnabled(IrcCap::MULTI_PREFIX)) {
+        // If multi-prefix is enabled, all modes will be sent in WHO replies.
+        // :kenny.chatspike.net 352 guest #test grawity broken.symlink *.chatspike.net grawity H@%+ :0 Mantas M.
+        // See: http://ircv3.net/specs/extensions/multi-prefix-3.1.html
+        QString uncheckedModes = awayStateAndModes;
+        QString validModes = QString();
+        while (!uncheckedModes.isEmpty()) {
+            // Mode found in 1 left-most character, add it to the list
+            if (net->prefixes().contains(uncheckedModes[0])) {
+                validModes.append(net->prefixToMode(uncheckedModes[0]));
+            }
+            // Remove this mode from the list of unchecked modes
+            uncheckedModes = uncheckedModes.remove(0, 1);
+        }
+
+        // Some IRC servers decide to not follow the spec, returning only -some- of the user
+        // modes in WHO despite listing them all in NAMES.  For now, assume it can only add
+        // and not take away.  *sigh*
+        if (!validModes.isEmpty()) {
+            if (targetChannel != "*") {
+                // Channel-specific modes received, apply to given channel only
+                IrcChannel *ircChan = net->ircChannel(targetChannel);
+                if (ircChan) {
+                    // Do one mode at a time
+                    // TODO Better way of syncing this without breaking protocol?
+                    for (int i = 0; i < validModes.count(); ++i) {
+                        ircChan->addUserMode(ircUser, validModes.at(i));
+                    }
+                }
+            } else {
+                // Modes apply to the user everywhere
+                ircUser->addUserModes(validModes);
+            }
+        }
+    }
+}
+
+
+/* ERR_NOSUCHCHANNEL - "<channel name> :No such channel" */
+void CoreSessionEventProcessor::processIrcEvent403(IrcEventNumeric *e)
+{
+    // If this is the result of an AutoWho, hide it.  It's confusing to show to the user.
+    if (!checkParamCount(e, 2))
+        return;
+
+    QString channelOrNick = e->params()[0];
+    // Check if channel name has a who in progress.
+    // If not, then check if user nick exists and has a who in progress.
+    if (coreNetwork(e)->isAutoWhoInProgress(channelOrNick)) {
+        qDebug() << "Channel/nick" << channelOrNick << "no longer exists during AutoWho, ignoring";
+        e->setFlag(EventManager::Silent);
+    }
+}
 
 /* ERR_ERRONEUSNICKNAME */
 void CoreSessionEventProcessor::processIrcEvent432(IrcEventNumeric *e)
@@ -1062,7 +1361,7 @@ void CoreSessionEventProcessor::handleCtcpDcc(CtcpEvent *e)
             }
 
             // TODO: check if target is the right thing to use for the partner
-            CoreTransfer *transfer = new CoreTransfer(Transfer::Receive, e->target(), filename, address, port, size, this);
+            CoreTransfer *transfer = new CoreTransfer(Transfer::Direction::Receive, e->target(), filename, address, port, size, this);
             coreSession()->signalProxy()->synchronize(transfer);
             coreSession()->transferManager()->addTransfer(transfer);
         }
@@ -1089,5 +1388,5 @@ void CoreSessionEventProcessor::handleCtcpTime(CtcpEvent *e)
 void CoreSessionEventProcessor::handleCtcpVersion(CtcpEvent *e)
 {
     e->setReply(QString("Quassel IRC %1 (built on %2) -- http://www.quassel-irc.org")
-        .arg(Quassel::buildInfo().plainVersionString).arg(Quassel::buildInfo().buildDate));
+        .arg(Quassel::buildInfo().plainVersionString).arg(Quassel::buildInfo().commitDate));
 }

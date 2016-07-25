@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2005-2015 by the Quassel Project                        *
+ *   Copyright (C) 2005-2016 by the Quassel Project                        *
  *   devel@quassel-irc.org                                                 *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -24,6 +24,9 @@
 #include "network.h"
 #include "coreircchannel.h"
 #include "coreircuser.h"
+
+// IRCv3 capabilities
+#include "irccap.h"
 
 #include <QTimer>
 
@@ -84,6 +87,9 @@ public:
 
     inline QString channelKey(const QString &channel) const { return _channelKeys.value(channel.toLower(), QString()); }
 
+    inline QByteArray readChannelCipherKey(const QString &channel) const { return _cipherKeys.value(channel.toLower()); }
+    inline void storeChannelCipherKey(const QString &channel, const QByteArray &key) { _cipherKeys[channel.toLower()] = key; }
+
     inline bool isAutoWhoInProgress(const QString &channel) const { return _autoWhoPending.value(channel.toLower(), 0); }
 
     inline UserId userId() const { return _coreSession->user(); }
@@ -96,6 +102,45 @@ public:
     inline quint16 peerPort() const { return socket.peerPort(); }
 
     QList<QList<QByteArray>> splitMessage(const QString &cmd, const QString &message, std::function<QList<QByteArray>(QString &)> cmdGenerator);
+
+    // IRCv3 capability negotiation
+
+    /**
+     * Checks if capability negotiation is currently ongoing.
+     *
+     * @returns True if in progress, otherwise false
+     */
+    inline bool capNegotiationInProgress() const { return !_capsQueued.empty(); }
+
+    /**
+     * Queues a capability to be requested.
+     *
+     * Adds to the list of capabilities being requested.  If non-empty, CAP REQ messages are sent
+     * to the IRC server.  This may happen at login or if capabilities are announced via CAP NEW.
+     *
+     * @param[in] capability Name of the capability
+     */
+    void queueCap(const QString &capability);
+
+    /**
+     * Begins capability negotiation if capabilities are queued, otherwise returns.
+     *
+     * If any capabilities are queued, this will begin the cycle of taking each capability and
+     * requesting it.  When no capabilities remain, capability negotiation is suitably ended.
+     */
+    void beginCapNegotiation();
+
+    /**
+     * List of capabilities requiring further core<->server messages to configure.
+     *
+     * For example, SASL requires the back-and-forth of AUTHENTICATE, so the next capability cannot
+     * be immediately sent.
+     *
+     * See: http://ircv3.net/specs/extensions/sasl-3.2.html
+     */
+    const QStringList capsRequiringConfiguration = QStringList {
+        IrcCap::SASL
+    };
 
 public slots:
     virtual void setMyNick(const QString &mynick);
@@ -131,9 +176,56 @@ public slots:
     bool cipherUsesCBC(const QString &target);
 #endif
 
+    // IRCv3 capability negotiation (can be connected to signals)
+
+    /**
+     * Indicates a capability is now available, with optional value in Network::capValue().
+     *
+     * @see Network::addCap()
+     *
+     * @param[in] capability Name of the capability
+     */
+    void serverCapAdded(const QString &capability);
+
+    /**
+     * Indicates a capability was acknowledged (enabled by the IRC server).
+     *
+     * @see Network::acknowledgeCap()
+     *
+     * @param[in] capability Name of the capability
+     */
+    void serverCapAcknowledged(const QString &capability);
+
+    /**
+     * Indicates a capability was removed from the list of available capabilities.
+     *
+     * @see Network::removeCap()
+     *
+     * @param[in] capability Name of the capability
+     */
+    void serverCapRemoved(const QString &capability);
+
+    /**
+     * Sends the next capability from the queue.
+     *
+     * During nick registration if any capabilities remain queued, this will take the next and
+     * request it.  When no capabilities remain, capability negotiation is ended.
+     */
+    void sendNextCap();
+
     void setAutoWhoEnabled(bool enabled);
     void setAutoWhoInterval(int interval);
     void setAutoWhoDelay(int delay);
+
+    /**
+     * Appends the given channel/nick to the front of the AutoWho queue.
+     *
+     * When 'away-notify' is enabled, this will trigger an immediate AutoWho since regular
+     * who-cycles are disabled as per IRCv3 specifications.
+     *
+     * @param[in] channelOrNick Channel or nickname to WHO
+     */
+    void queueAutoWhoOneshot(const QString &channelOrNick);
 
     bool setAutoWhoDone(const QString &channel);
 
@@ -162,7 +254,6 @@ signals:
     void sslErrors(const QVariant &errorData);
 
     void newEvent(Event *event);
-    void socketOpen(const CoreIdentity *identity, const QHostAddress &localAddress, quint16 localPort, const QHostAddress &peerAddress, quint16 peerPort);
     void socketInitialized(const CoreIdentity *identity, const QHostAddress &localAddress, quint16 localPort, const QHostAddress &peerAddress, quint16 peerPort);
     void socketDisconnected(const CoreIdentity *identity, const QHostAddress &localAddress, quint16 localPort, const QHostAddress &peerAddress, quint16 peerPort);
 
@@ -238,6 +329,21 @@ private:
     QHash<QString, int> _autoWhoPending;
     QTimer _autoWhoTimer, _autoWhoCycleTimer;
 
+    // Maintain a list of CAPs that are being checked; if empty, negotiation finished
+    // See http://ircv3.net/specs/core/capability-negotiation-3.2.html
+    QStringList _capsQueued;           /// Capabilities to be checked
+    bool _capNegotiationActive;        /// Whether or not full capability negotiation was started
+    // Avoid displaying repeat "negotiation finished" messages
+    bool _capInitialNegotiationEnded;  /// Whether or not initial capability negotiation finished
+    // Avoid sending repeat "CAP END" replies when registration is already ended
+
+    /**
+     * Gets the next capability to request, removing it from the queue.
+     *
+     * @returns Name of capability to request
+     */
+    QString takeQueuedCap();
+
     QTimer _tokenBucketTimer;
     int _messageDelay;      // token refill speed in ms
     int _burstSize;         // size of the token bucket
@@ -245,6 +351,9 @@ private:
     QList<QByteArray> _msgQueue;
 
     QString _requestedUserModes; // 2 strings separated by a '-' character. first part are requested modes to add, the second to remove
+
+    // List of blowfish keys for channels
+    QHash<QString, QByteArray> _cipherKeys;
 };
 
 

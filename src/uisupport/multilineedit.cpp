@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2005-2015 by the Quassel Project                        *
+ *   Copyright (C) 2005-2016 by the Quassel Project                        *
  *   devel@quassel-irc.org                                                 *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -19,9 +19,12 @@
  ***************************************************************************/
 
 #include <QApplication>
-#include <QMenu>
 #include <QMessageBox>
 #include <QScrollBar>
+
+#ifdef HAVE_SONNET
+#  include <Sonnet/SpellCheckDecorator>
+#endif
 
 #include "actioncollection.h"
 #include "bufferview.h"
@@ -41,6 +44,7 @@ MultiLineEdit::MultiLineEdit(QWidget *parent)
     _scrollBarsEnabled(true),
     _pasteProtectionEnabled(true),
     _emacsMode(false),
+    _completionSpace(0),
     _lastDocumentHeight(-1)
 {
     document()->setDocumentMargin(0);
@@ -50,9 +54,16 @@ MultiLineEdit::MultiLineEdit(QWidget *parent)
     enableFindReplace(false);
 #endif
 
+#ifdef HAVE_SONNET
+    new Sonnet::SpellCheckDecorator(this);
+#endif
+
     setMode(SingleLine);
     setLineWrapEnabled(false);
     reset();
+
+    // Prevent QTextHtmlImporter::appendNodeText from eating whitespace
+    document()->setDefaultStyleSheet("span { white-space: pre-wrap; }");
 
     connect(this, SIGNAL(textChanged()), this, SLOT(on_textChanged()));
 
@@ -667,8 +678,12 @@ void MultiLineEdit::on_returnPressed()
 }
 
 
-void MultiLineEdit::on_returnPressed(const QString &text)
+void MultiLineEdit::on_returnPressed(QString text)
 {
+    if (_completionSpace && text.endsWith(" ")) {
+        text.chop(1);
+    }
+
     if (!text.isEmpty()) {
         foreach(const QString &line, text.split('\n', QString::SkipEmptyParts)) {
             if (line.isEmpty())
@@ -687,6 +702,8 @@ void MultiLineEdit::on_returnPressed(const QString &text)
 
 void MultiLineEdit::on_textChanged()
 {
+    _completionSpace = qMax(_completionSpace - 1, 0);
+
     QString newText = text();
     newText.replace("\r\n", "\n");
     newText.replace('\r', '\n');
@@ -769,3 +786,12 @@ void MultiLineEdit::showHistoryEntry()
     setTextCursor(cursor);
     updateScrollBars();
 }
+
+
+void MultiLineEdit::addCompletionSpace()
+{
+    // Inserting the space emits textChanged, which should not disable removal
+    _completionSpace = 2;
+    insertPlainText(" ");
+}
+

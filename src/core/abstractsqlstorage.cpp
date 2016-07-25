@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2005-2015 by the Quassel Project                        *
+ *   Copyright (C) 2005-2016 by the Quassel Project                        *
  *   devel@quassel-irc.org                                                 *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -41,7 +41,7 @@ AbstractSqlStorage::~AbstractSqlStorage()
 {
     // disconnect the connections, so their deletion is no longer interessting for us
     QHash<QThread *, Connection *>::iterator conIter;
-    for (conIter = _connectionPool.begin(); conIter != _connectionPool.end(); conIter++) {
+    for (conIter = _connectionPool.begin(); conIter != _connectionPool.end(); ++conIter) {
         QSqlDatabase::removeDatabase(conIter.value()->name());
         disconnect(conIter.value(), 0, this, 0);
     }
@@ -275,7 +275,7 @@ bool AbstractSqlStorage::watchQuery(QSqlQuery &query)
         QVariantMap boundValues = query.boundValues();
         QStringList valueStrings;
         QVariantMap::const_iterator iter;
-        for (iter = boundValues.constBegin(); iter != boundValues.constEnd(); iter++) {
+        for (iter = boundValues.constBegin(); iter != boundValues.constEnd(); ++iter) {
             QString value;
             QSqlField field;
             if (query.driver()) {

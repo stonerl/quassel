@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2005-2015 by the Quassel Project                        *
+ *   Copyright (C) 2005-2016 by the Quassel Project                        *
  *   devel@quassel-irc.org                                                 *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -28,6 +28,15 @@ CoreIrcChannel::CoreIrcChannel(const QString &channelname, Network *network)
 {
 #ifdef HAVE_QCA2
     _cipher = 0;
+
+    // Get the cipher key from CoreNetwork if present
+    CoreNetwork *coreNetwork = qobject_cast<CoreNetwork *>(network);
+    if (coreNetwork) {
+        QByteArray key = coreNetwork->readChannelCipherKey(channelname);
+        if (!key.isEmpty()) {
+            setEncrypted(cipher()->setKey(key));
+        }
+    }
 #endif
 }
 
@@ -35,6 +44,15 @@ CoreIrcChannel::CoreIrcChannel(const QString &channelname, Network *network)
 CoreIrcChannel::~CoreIrcChannel()
 {
 #ifdef HAVE_QCA2
+    // Store the cipher key in CoreNetwork, including empty keys if a cipher
+    // exists. There is no need to store the empty key if no cipher exists; no
+    // key was present when instantiating and no key was set during the
+    // channel's lifetime.
+    CoreNetwork *coreNetwork = qobject_cast<CoreNetwork *>(network());
+    if (coreNetwork && _cipher) {
+        coreNetwork->storeChannelCipherKey(name(), _cipher->key());
+    }
+
     delete _cipher;
 #endif
 }

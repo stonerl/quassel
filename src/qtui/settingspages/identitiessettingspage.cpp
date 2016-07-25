@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2005-2015 by the Quassel Project                        *
+ *   Copyright (C) 2005-2016 by the Quassel Project                        *
  *   devel@quassel-irc.org                                                 *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -84,7 +84,7 @@ void IdentitiesSettingsPage::continueUnsecured()
     _editSsl = true;
 
     QHash<IdentityId, CertIdentity *>::iterator idIter;
-    for (idIter = identities.begin(); idIter != identities.end(); idIter++) {
+    for (idIter = identities.begin(); idIter != identities.end(); ++idIter) {
         idIter.value()->enableEditSsl();
     }
 

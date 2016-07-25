@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2005-2015 by the Quassel Project                        *
+ *   Copyright (C) 2005-2016 by the Quassel Project                        *
  *   devel@quassel-irc.org                                                 *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -81,7 +81,7 @@ QByteArray CtcpParser::lowLevelQuote(const QByteArray &message)
     QHash<QByteArray, QByteArray>::const_iterator quoteIter = quoteHash.constBegin();
     while (quoteIter != quoteHash.constEnd()) {
         quotedMessage.replace(quoteIter.value(), quoteIter.key());
-        quoteIter++;
+        ++quoteIter;
     }
     return quotedMessage;
 }
@@ -117,7 +117,7 @@ QByteArray CtcpParser::xdelimQuote(const QByteArray &message)
     QHash<QByteArray, QByteArray>::const_iterator quoteIter = _ctcpXDelimDequoteHash.constBegin();
     while (quoteIter != _ctcpXDelimDequoteHash.constEnd()) {
         quotedMessage.replace(quoteIter.value(), quoteIter.key());
-        quoteIter++;
+        ++quoteIter;
     }
     return quotedMessage;
 }
@@ -171,6 +171,27 @@ void CtcpParser::parse(IrcEventRawMessage *e, Message::Type messagetype)
                            ? Message::Redirected
                            : Message::None;
 
+    bool isStatusMsg = false;
+
+    // First remove all statusmsg prefix characters that are not also channel prefix characters.
+    while (e->network()->isStatusMsg(e->target()) && !e->network()->isChannelName(e->target())) {
+        isStatusMsg = true;
+        e->setTarget(e->target().remove(0, 1));
+    }
+
+    // Then continue removing statusmsg characters as long as removing the character will still result in a
+    // valid channel name.  This prevents removing the channel prefix character if said character is in the
+    // overlap between the statusmsg characters and the channel prefix characters.
+    while (e->network()->isStatusMsg(e->target()) && e->network()->isChannelName(e->target().remove(0, 1))) {
+        isStatusMsg = true;
+        e->setTarget(e->target().remove(0, 1));
+    }
+
+    // If any statusmsg characters were removed, Flag the message as a StatusMsg.
+    if (isStatusMsg) {
+        flags |= Message::StatusMsg;
+    }
+
     if (coreSession()->networkConfig()->standardCtcp())
         parseStandard(e, messagetype, dequotedMessage, ctcptype, flags);
     else
@@ -185,7 +206,7 @@ void CtcpParser::parseSimple(IrcEventRawMessage *e, Message::Type messagetype, Q
     if (dequotedMessage.count(XDELIM) != 2 || dequotedMessage[0] != '\001' || dequotedMessage[dequotedMessage.count() -1] != '\001') {
         displayMsg(e, messagetype, targetDecode(e, dequotedMessage), e->prefix(), e->target(), flags);
     } else {
-        int spacePos = -1;
+        int spacePos;
         QString ctcpcmd, ctcpparam;
 
         QByteArray ctcp = xdelimDequote(dequotedMessage.mid(1, dequotedMessage.count() - 2));
