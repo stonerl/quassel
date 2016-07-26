@@ -5,9 +5,10 @@ build_script:
 
     Import-Module $env:APPVEYOR_BUILD_FOLDER\scripts\build\appveyorHelp.psm1
 
-    Init @("ninja", "png2ico", "nsis", "7zip.commandline") ([ordered]@{"git://anongit.kde.org/extra-cmake-modules.git" = @{"branch" = "master"};
+    Init @("ninja", "png2ico", "nsis", "7zip.commandline", "hunspell.portable") ([ordered]@{"git://anongit.kde.org/extra-cmake-modules.git" = @{"branch" = "master"};
                                  "https://github.com/Snorenotify/SnoreGrowl.git" = @{"branch" = "v0.4.0"; "buildType" = "Release"};
-                                 "git://anongit.kde.org/snorenotify.git" = @{"branch" = "v0.7.0"; "buildType" = "Release"}})
+                                 "git://anongit.kde.org/snorenotify.git" = @{"branch" = "v0.7.0"; "buildType" = "Release"};
+                                 "git://anongit.kde.org/sonnet.git" = @{"branch" = "v5.21.0"; "buildType" = "Release"; "options" = "-DHUNSPELL_INCLUDE_DIR=C:\ProgramData\chocolatey\lib\hunspell.portable\tools\include -DHUNSPELL_LIBRARIES=C:\ProgramData\chocolatey\lib\hunspell.portable\tools\lib"}})
 
 
     mkdir -Force $env:APPVEYOR_BUILD_FOLDER\work\build\$env:APPVEYOR_PROJECT_NAME
@@ -55,6 +56,9 @@ build_script:
                             #
                             #Growl
                             "bin\\.*snoregrowl.*\.dll",
+                            #
+                            #Sonnet
+                            "bin\\.*Sonnet.*\.dll",
                             #
                             #ssl
                             ".*\\libeay32\.dll",
